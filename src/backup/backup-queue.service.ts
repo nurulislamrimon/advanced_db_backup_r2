@@ -51,37 +51,17 @@ export class BackupQueueService {
   }
 
   async addCronJob(cronExpression: string): Promise<void> {
-    const pattern = this.parseCronToPattern(cronExpression);
-
     await this.queue.add(
       'scheduled-backup',
       {},
       {
         repeat: {
-          pattern,
+          pattern: cronExpression,
         },
       }
     );
 
-    this.logger.log(`Scheduled backup job with pattern: ${pattern}`);
-  }
-
-  private parseCronToPattern(cron: string): string {
-    const parts = cron.trim().split(/\b/);
-    if (parts.length < 5) {
-      throw new Error('Invalid cron expression');
-    }
-
-    const [minute, hour, dayOfMonth, month, dayOfWeek] = parts.slice(0, 5);
-
-    const toCronField = (field: string): string => {
-      if (field === '*') return '*';
-      const num = parseInt(field, 10);
-      if (!isNaN(num)) return String(num);
-      return field;
-    };
-
-    return `${toCronField(minute)} ${toCronField(hour)} ${toCronField(dayOfMonth)} ${toCronField(month)} ${toCronField(dayOfWeek)}`;
+    this.logger.log(`Scheduled backup job with cron: ${cronExpression}`);
   }
 
   async close(): Promise<void> {
