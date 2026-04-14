@@ -24,7 +24,7 @@ export class RetentionService {
     logger.info('Starting retention policy', { dryRun });
 
     const allBackups = await this.r2Service.listBackups('backups/');
-    
+
     if (allBackups.length === 0) {
       logger.info('No backups found to process');
       return { deleted: [], kept: [], errors: [] };
@@ -64,7 +64,7 @@ export class RetentionService {
 
   private parseBackupDates(keys: string[]): BackupInfo[] {
     const regex = /backups\/(\d{4})-(\d{2})-(\d{2})\/backup-(\d{8})T(\d{6})(\d{3})Z\.sql\.gz/;
-    
+
     return keys
       .map((key) => {
         const match = key.match(regex);
@@ -73,7 +73,7 @@ export class RetentionService {
           return null;
         }
 
-        const [, year, month, day, datePart, timePart, ms] = match;
+        const [, year, month, day, _datePart, timePart, ms] = match;
         const dateStr = `${year}-${month}-${day}T${timePart.slice(0, 2)}:${timePart.slice(2, 4)}:${timePart.slice(4, 6)}.${ms}Z`;
         const date = new Date(dateStr);
 
@@ -84,7 +84,14 @@ export class RetentionService {
 
         const week = this.getWeekNumber(date);
 
-        return { key, date, year: parseInt(year), month: parseInt(month), week, day: parseInt(day) };
+        return {
+          key,
+          date,
+          year: parseInt(year),
+          month: parseInt(month),
+          week,
+          day: parseInt(day),
+        };
       })
       .filter((b): b is BackupInfo => b !== null);
   }
@@ -97,7 +104,10 @@ export class RetentionService {
     return Math.ceil(((d.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
   }
 
-  private determineRetention(sortedBackups: BackupInfo[]): { toKeep: BackupInfo[]; toDelete: BackupInfo[] } {
+  private determineRetention(sortedBackups: BackupInfo[]): {
+    toKeep: BackupInfo[];
+    toDelete: BackupInfo[];
+  } {
     const toKeep: BackupInfo[] = [];
     const toDelete: BackupInfo[] = [];
 

@@ -1,6 +1,6 @@
 import { Module, Global } from '@nestjs/common';
 import { RetentionService } from './retention.service';
-import { RetentionConfig } from '../types';
+import { RetentionConfig, R2Config } from '../types';
 
 export { RetentionService };
 export { RetentionConfig };
@@ -10,15 +10,23 @@ export { RetentionConfig };
   providers: [
     {
       provide: RetentionService,
-      useFactory: (r2Service: any) => {
+      useFactory: () => {
         const config: RetentionConfig = {
           daily: parseInt(process.env.RETENTION_DAILY || '7'),
           weekly: parseInt(process.env.RETENTION_WEEKLY || '4'),
           monthly: parseInt(process.env.RETENTION_MONTHLY || '12'),
         };
+        const r2Config: R2Config = {
+          endpoint: process.env.R2_ENDPOINT || '',
+          accessKey: process.env.R2_ACCESS_KEY || '',
+          secretKey: process.env.R2_SECRET_KEY || '',
+          bucket: process.env.R2_BUCKET || '',
+        };
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { R2Service } = require('../r2/r2.service');
+        const r2Service = new R2Service(r2Config);
         return new RetentionService(r2Service, config);
       },
-      inject: [require('../r2/r2.service').R2Service],
     },
   ],
   exports: [RetentionService],

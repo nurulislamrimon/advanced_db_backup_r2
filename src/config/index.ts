@@ -1,4 +1,12 @@
-import { AppConfig, BackupConfig, DatabaseConfig, R2Config, AlertConfig, RetentionConfig } from '../types';
+import {
+  AppConfig,
+  BackupConfig,
+  DatabaseConfig,
+  R2Config,
+  AlertConfig,
+  RetentionConfig,
+} from '../types';
+import * as fs from 'fs';
 
 function getEnv(key: string, required = true): string {
   const value = process.env[key];
@@ -47,7 +55,7 @@ export function loadConfig(): AppConfig {
   let alert: AlertConfig | undefined;
   if (getEnv('ALERT_WEBHOOK', false) || getEnv('ALERT_EMAIL', false)) {
     alert = {
-      type: getEnv('ALERT_TYPE', false) as 'email' | 'webhook' || 'webhook',
+      type: (getEnv('ALERT_TYPE', false) as 'email' | 'webhook') || 'webhook',
       url: getEnv('ALERT_WEBHOOK', false) || getEnv('ALERT_EMAIL', false) || '',
       enabled: true,
     };
@@ -59,7 +67,6 @@ export function loadConfig(): AppConfig {
 export function getLastBackupTime(): number | null {
   const lastBackupPath = `${process.env.TEMP_DIR || '/tmp'}/last_backup_timestamp`;
   try {
-    const fs = require('fs');
     if (fs.existsSync(lastBackupPath)) {
       const timestamp = parseInt(fs.readFileSync(lastBackupPath, 'utf-8'), 10);
       return isNaN(timestamp) ? null : timestamp;
@@ -73,8 +80,8 @@ export function getLastBackupTime(): number | null {
 export function setLastBackupTime(timestamp: number): void {
   const lastBackupPath = `${process.env.TEMP_DIR || '/tmp'}/last_backup_timestamp`;
   try {
-    const fs = require('fs');
     fs.writeFileSync(lastBackupPath, timestamp.toString());
   } catch {
+    // Silently fail
   }
 }

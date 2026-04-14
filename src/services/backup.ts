@@ -1,5 +1,12 @@
 import { spawn } from 'child_process';
-import { createWriteStream, createReadStream, existsSync, statSync, unlinkSync } from 'fs';
+import {
+  createWriteStream,
+  createReadStream,
+  existsSync,
+  statSync,
+  unlinkSync,
+  renameSync,
+} from 'fs';
 import { createHash } from 'crypto';
 import { pipeline } from 'stream/promises';
 import { createGzip } from 'zlib';
@@ -13,7 +20,12 @@ export class BackupService {
   private enableEncryption: boolean;
   private encryptionKey?: string;
 
-  constructor(dbConfig: DatabaseConfig, tempDir: string, enableEncryption = false, encryptionKey?: string) {
+  constructor(
+    dbConfig: DatabaseConfig,
+    tempDir: string,
+    enableEncryption = false,
+    encryptionKey?: string
+  ) {
     this.dbConfig = dbConfig;
     this.tempDir = tempDir;
     this.enableEncryption = enableEncryption;
@@ -31,7 +43,7 @@ export class BackupService {
 
     try {
       await this.runPgDumpWithGzip(filepath);
-      
+
       const validated = await this.validateBackupFile(filepath);
       if (!validated.valid) {
         throw new Error(validated.error);
@@ -79,14 +91,21 @@ export class BackupService {
     };
 
     const pgdumpArgs = [
-      '-h', this.dbConfig.host,
-      '-p', this.dbConfig.port.toString(),
-      '-U', this.dbConfig.username,
-      '-d', this.dbConfig.database,
+      '-h',
+      this.dbConfig.host,
+      '-p',
+      this.dbConfig.port.toString(),
+      '-U',
+      this.dbConfig.username,
+      '-d',
+      this.dbConfig.database,
       '-Fc',
     ];
 
-    logger.debug('Executing pg_dump with gzip compression', { host: this.dbConfig.host, database: this.dbConfig.database });
+    logger.debug('Executing pg_dump with gzip compression', {
+      host: this.dbConfig.host,
+      database: this.dbConfig.database,
+    });
 
     const pgdump = spawn('pg_dump', pgdumpArgs, { env });
     const gzip = createGzip();
@@ -130,7 +149,7 @@ export class BackupService {
     return new Promise((resolve, reject) => {
       const hash = createHash('sha256');
       const stream = createReadStream(filepath);
-      
+
       stream.on('data', (data) => hash.update(data));
       stream.on('end', () => resolve(hash.digest('hex')));
       stream.on('error', reject);
@@ -153,7 +172,7 @@ export class BackupService {
     await pipeline(input, cipher, output);
 
     unlinkSync(filepath);
-    require('fs').renameSync(encryptedPath, filepath);
+    renameSync(encryptedPath, filepath);
     logger.info('Backup file encrypted', { filepath });
   }
 
