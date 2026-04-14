@@ -1,27 +1,46 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
-import * as cron from 'node-cron';
+import { Injectable, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { loadConfig } from '../config';
 import { BackupService } from './backup.service';
+import { BackupQueueService } from './backup-queue.service';
 
 @Injectable()
-export class BackupSchedulerService implements OnModuleInit {
+export class BackupSchedulerService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(BackupSchedulerService.name);
   private schedule: string;
+  private queueService!: BackupQueueService;
 
   constructor(private readonly backupService: BackupService) {
     const config = loadConfig();
     this.schedule = config.backup.schedule;
   }
 
-  onModuleInit() {
-    this.startScheduler();
+  async onModuleInit() {
+    const redisHost = process.env.REDIS_HOST || 'localhost';
+    const redisPort = parseInt(process.env.REDIS_PORT || '6379', 10);
+
+    this.queueService = new BackupQueueService(redisHost, redisPort, () =>
+      this.backupService.runBackup()
+    );
+
+    await this.queueService.addCronJob(this.schedule);
+    this.logger.log(`Backup scheduler started with schedule: ${this.schedule}`);
   }
 
-  private startScheduler() {
-    this.logger.log(`Starting backup scheduler: ${this.schedule}`);
-    
-    cron.schedule(this.schedule, async () => {
-      await this.backupService.runBackup();
-    });
+  async onModuleDestroy() {
+    if (this.queueService) {
+      await this.queueService.close();
+    }
+  }
+
+  async getQueueHealth() {
+    if (!this.queueService) {
+      return { status: 'not_initialized' };
+    }
+    const counts = await this.queueService.getJobCounts();
+    return {
+      status: 'ok',
+      queue: 'backup-queue',
+      jobs: counts,
+    };
   }
 }

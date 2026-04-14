@@ -19,6 +19,11 @@ export class BackupController {
     return this.backupService.getHealth();
   }
 
+  @Get('backup/queue/health')
+  async getQueueHealth() {
+    return this.schedulerService.getQueueHealth();
+  }
+
   @Post('backup/trigger')
   async triggerBackup() {
     return this.backupService.runBackup();

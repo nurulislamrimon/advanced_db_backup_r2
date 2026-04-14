@@ -5,6 +5,7 @@ import {
   R2Config,
   AlertConfig,
   RetentionConfig,
+  RedisConfig,
 } from '../types';
 import * as fs from 'fs';
 
@@ -52,6 +53,11 @@ export function loadConfig(): AppConfig {
     encryptionKey: getEnv('ENCRYPTION_KEY', false) || undefined,
   };
 
+  const redis: RedisConfig = {
+    host: getEnv('REDIS_HOST', false) || 'localhost',
+    port: getEnvNumber('REDIS_PORT', 6379),
+  };
+
   let alert: AlertConfig | undefined;
   if (getEnv('ALERT_WEBHOOK', false) || getEnv('ALERT_EMAIL', false)) {
     alert = {
@@ -61,7 +67,7 @@ export function loadConfig(): AppConfig {
     };
   }
 
-  return { db, r2, backup, alert };
+  return { db, r2, backup, redis, alert };
 }
 
 export function getLastBackupTime(): number | null {

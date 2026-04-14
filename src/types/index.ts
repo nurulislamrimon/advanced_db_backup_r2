@@ -6,6 +6,11 @@ export interface DatabaseConfig {
   database: string;
 }
 
+export interface RedisConfig {
+  host: string;
+  port: number;
+}
+
 export interface R2Config {
   endpoint: string;
   accessKey: string;
@@ -41,6 +46,7 @@ export interface AppConfig {
   db: DatabaseConfig;
   r2: R2Config;
   backup: BackupConfig;
+  redis: RedisConfig;
   alert?: AlertConfig;
 }
 
