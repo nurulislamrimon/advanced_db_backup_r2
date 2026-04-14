@@ -8,7 +8,7 @@ volumes:
 services:
   backup-worker:
     container_name: backup_worker
-
+    image: db_backup:prod
     # build:
     #   context: .
     #   dockerfile: Dockerfile
