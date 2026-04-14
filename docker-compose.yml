@@ -8,9 +8,10 @@ volumes:
 services:
   backup-worker:
     container_name: backup_worker
-    build:
-      context: .
-      dockerfile: Dockerfile
+
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
     restart: always
     env_file:
       - .env
