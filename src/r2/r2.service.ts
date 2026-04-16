@@ -5,8 +5,9 @@ import {
   ListObjectsV2Command,
   DeleteObjectsCommand,
   HeadObjectCommand,
+  GetObjectCommand,
 } from '@aws-sdk/client-s3';
-import { createReadStream, statSync } from 'fs';
+import { createReadStream, createWriteStream, statSync, existsSync, unlinkSync } from 'fs';
 import { R2Config, BackupMetadata } from '../types';
 
 const MAX_RETRIES = 3;
@@ -148,5 +149,55 @@ export class R2Service {
 
   private delay(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  async downloadFile(
+    key: string,
+    localPath: string
+  ): Promise<{ success: boolean; error?: string }> {
+    this.logger.log(`Downloading ${key} to ${localPath}`);
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const command = new GetObjectCommand({
+          Bucket: this.bucket,
+          Key: key,
+        });
+
+        const response = await this.client.send(command);
+
+        if (!response.Body) {
+          return { success: false, error: 'Empty response body' };
+        }
+
+        const writer = createWriteStream(localPath);
+        const stream = response.Body as any;
+
+        await new Promise<void>((resolve, reject) => {
+          stream.pipe(writer);
+          writer.on('finish', resolve);
+          writer.on('error', reject);
+        });
+
+        this.logger.log(`Download successful: ${key}`);
+        return { success: true };
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        this.logger.warn(`Download attempt ${attempt} failed: ${errorMessage}`);
+
+        if (existsSync(localPath)) {
+          unlinkSync(localPath);
+        }
+
+        if (attempt < MAX_RETRIES) {
+          await this.delay(RETRY_DELAY_MS * attempt);
+        } else {
+          this.logger.error(`Download failed after retries: ${key}`);
+          return { success: false, error: errorMessage };
+        }
+      }
+    }
+
+    return { success: false, error: 'Max retries exceeded' };
   }
 }

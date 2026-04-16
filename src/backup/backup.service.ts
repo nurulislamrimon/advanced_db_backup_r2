@@ -5,6 +5,15 @@ import { R2Service } from '../r2/r2.service';
 import { RetentionService } from '../retention/retention.service';
 import { AlertService } from '../alert/alert.service';
 import { BackupMetadata } from '../types';
+import { RestoreDto } from './dto/restore.dto';
+import { existsSync, unlinkSync, createWriteStream } from 'fs';
+import { spawn } from 'child_process';
+
+export interface RestoreResult {
+  success: boolean;
+  message: string;
+  error?: string;
+}
 
 @Injectable()
 export class BackupService {
@@ -157,5 +166,275 @@ export class BackupService {
       lastBackup: getLastBackupTime(),
       isRunning: this.isRunning,
     };
+  }
+
+  async restoreBackup(dto: RestoreDto): Promise<RestoreResult> {
+    const config = loadConfig();
+    const tempDir = config.backup.tempDir;
+    const localPath = `${tempDir}/restore-${dto.filename}`;
+
+    try {
+      const allKeys = await this.r2Service.listBackups('backups/');
+      const matchingKey = allKeys.find((k) => k.endsWith(dto.filename));
+
+      if (!matchingKey) {
+        return {
+          success: false,
+          message: 'Backup file not found',
+          error: `No file matching "${dto.filename}"`,
+        };
+      }
+
+      const downloadResult = await this.r2Service.downloadFile(matchingKey, localPath);
+
+      if (!downloadResult.success) {
+        return { success: false, message: 'Download failed', error: downloadResult.error };
+      }
+
+      const targetHost = dto.host || config.db.host;
+      const targetPort = dto.port || config.db.port;
+      const targetUser = dto.username || config.db.username;
+      const targetPass = dto.password || config.db.password;
+      const targetDb = dto.database || config.db.database;
+
+      this.logger.log(`Restoring to ${targetHost}:${targetPort}/${targetDb} as ${targetUser}`);
+
+      if (dto.dropExisting) {
+        this.logger.log(`Dropping existing database: ${targetDb}`);
+        const dropResult = await this.dropDatabase(
+          targetHost,
+          targetPort,
+          targetUser,
+          targetPass,
+          targetDb
+        );
+        if (!dropResult.success) {
+          return { success: false, message: 'Drop database failed', error: dropResult.error };
+        }
+
+        this.logger.log(`Creating database: ${targetDb}`);
+        const createResult = await this.createDatabase(
+          targetHost,
+          targetPort,
+          targetUser,
+          targetPass,
+          targetDb
+        );
+        if (!createResult.success) {
+          return { success: false, message: 'Create database failed', error: createResult.error };
+        }
+      }
+
+      const restoreResult = await this.restorePgDump(
+        localPath,
+        targetHost,
+        targetPort,
+        targetUser,
+        targetPass,
+        targetDb
+      );
+
+      return restoreResult;
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return { success: false, message: 'Restore failed', error: errorMessage };
+    } finally {
+      if (existsSync(localPath)) {
+        unlinkSync(localPath);
+      }
+    }
+  }
+
+  private async dropDatabase(
+    host: string,
+    port: number,
+    username: string,
+    password: string,
+    database: string
+  ): Promise<{ success: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      const env = { ...process.env, PGPASSWORD: password };
+      const psql = spawn(
+        'psql',
+        [
+          '-h',
+          host,
+          '-p',
+          port.toString(),
+          '-U',
+          username,
+          '-d',
+          'postgres',
+          '-c',
+          `DROP DATABASE IF EXISTS "${database}"`,
+        ],
+        { env }
+      );
+
+      let stderr = '';
+      psql.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      psql.on('close', (code) => {
+        if (code === 0) {
+          resolve({ success: true });
+        } else {
+          resolve({ success: false, error: stderr });
+        }
+      });
+
+      psql.on('error', (err) => {
+        resolve({ success: false, error: err.message });
+      });
+    });
+  }
+
+  private async createDatabase(
+    host: string,
+    port: number,
+    username: string,
+    password: string,
+    database: string
+  ): Promise<{ success: boolean; error?: string }> {
+    return new Promise((resolve) => {
+      const env = { ...process.env, PGPASSWORD: password };
+      const psql = spawn(
+        'psql',
+        [
+          '-h',
+          host,
+          '-p',
+          port.toString(),
+          '-U',
+          username,
+          '-d',
+          'postgres',
+          '-c',
+          `CREATE DATABASE "${database}"`,
+        ],
+        { env }
+      );
+
+      let stderr = '';
+      let stdout = '';
+      psql.stdout.on('data', (data) => {
+        stdout += data.toString();
+      });
+      psql.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+
+      psql.on('close', (code) => {
+        if (code === 0) {
+          this.logger.log(`Database created: ${database}`);
+          resolve({ success: true });
+        } else {
+          this.logger.error(`Create database failed: ${stdout} ${stderr}`);
+          resolve({ success: false, error: stdout + '\n' + stderr });
+        }
+      });
+
+      psql.on('error', (err) => {
+        resolve({ success: false, error: err.message });
+      });
+    });
+  }
+
+  private async restorePgDump(
+    filepath: string,
+    host: string,
+    port: number,
+    username: string,
+    password: string,
+    database: string
+  ): Promise<RestoreResult> {
+    return new Promise((resolve) => {
+      const env = { ...process.env, PGPASSWORD: password };
+      const decompressedPath = filepath.replace('.gz', '');
+
+      const gunzip = spawn('gunzip', ['-c', '-d', filepath]);
+      const output = createWriteStream(decompressedPath);
+
+      let stderr = '';
+      gunzip.stderr.on('data', (data) => {
+        stderr += data.toString();
+      });
+      gunzip.stdout.pipe(output);
+
+      gunzip.on('close', (code) => {
+        output.end(() => {
+          if (code !== 0) {
+            resolve({ success: false, message: `Gunzip failed (code ${code})`, error: stderr });
+            return;
+          }
+
+          const pgRestore = spawn(
+            'pg_restore',
+            [
+              '-h',
+              host,
+              '-p',
+              port.toString(),
+              '-U',
+              username,
+              '-d',
+              database,
+              '-v',
+              decompressedPath,
+            ],
+            { env }
+          );
+
+          let pgRestoreStdout = '';
+          let pgRestoreStderr = '';
+          pgRestore.stdout.on('data', (data) => {
+            pgRestoreStdout += data.toString();
+          });
+          pgRestore.stderr.on('data', (data) => {
+            pgRestoreStderr += data.toString();
+          });
+
+          pgRestore.on('close', (restoreCode) => {
+            if (existsSync(decompressedPath)) {
+              unlinkSync(decompressedPath);
+            }
+            if (restoreCode === 0) {
+              this.logger.log('Restore completed successfully');
+              resolve({ success: true, message: 'Restore completed successfully' });
+            } else {
+              const output = pgRestoreStdout + '\n' + pgRestoreStderr;
+              if (output.includes('warning') || output.includes('ignored')) {
+                this.logger.warn(`pg_restore completed with warnings: ${output}`);
+                resolve({
+                  success: true,
+                  message: 'Restore completed (with warnings)',
+                  error: output,
+                });
+              } else {
+                this.logger.error(`pg_restore failed: ${output}`);
+                resolve({
+                  success: false,
+                  message: `pg_restore failed (code ${restoreCode})`,
+                  error: output,
+                });
+              }
+            }
+          });
+
+          pgRestore.on('error', (err) => {
+            if (existsSync(decompressedPath)) {
+              unlinkSync(decompressedPath);
+            }
+            this.logger.error(`pg_restore error: ${err.message}`);
+            resolve({ success: false, message: 'pg_restore failed', error: err.message });
+          });
+        });
+      });
+
+      gunzip.on('error', (err) => {
+        resolve({ success: false, message: 'Gunzip failed', error: err.message });
+      });
+    });
   }
 }

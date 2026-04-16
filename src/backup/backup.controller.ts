@@ -1,6 +1,7 @@
-import { Controller, Post, Get } from '@nestjs/common';
+import { Controller, Post, Get, Body } from '@nestjs/common';
 import { BackupService } from './backup.service';
 import { BackupSchedulerService } from './backup-scheduler.service';
+import { RestoreDto } from './dto/restore.dto';
 
 @Controller()
 export class BackupController {
@@ -32,5 +33,10 @@ export class BackupController {
   @Get('backup/files')
   async getAllBackups() {
     return this.backupService.getAllBackups();
+  }
+
+  @Post('backup/restore')
+  async restoreBackup(@Body() dto: RestoreDto) {
+    return this.backupService.restoreBackup(dto);
   }
 }

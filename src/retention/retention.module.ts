@@ -1,6 +1,7 @@
 import { Module, Global } from '@nestjs/common';
 import { RetentionService } from './retention.service';
 import { RetentionConfig, R2Config } from '../types';
+import { R2Service } from '../r2/r2.service';
 
 export { RetentionService };
 export { RetentionConfig };
@@ -22,8 +23,6 @@ export { RetentionConfig };
           secretKey: process.env.R2_SECRET_KEY || '',
           bucket: process.env.R2_BUCKET || '',
         };
-        // eslint-disable-next-line @typescript-eslint/no-require-imports
-        const { R2Service } = require('../r2/r2.service');
         const r2Service = new R2Service(r2Config);
         return new RetentionService(r2Service, config);
       },
