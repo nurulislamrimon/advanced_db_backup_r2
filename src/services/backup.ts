@@ -115,8 +115,6 @@ export class BackupService {
       logger.debug('pg_dump stderr', { output: data.toString() });
     });
 
-    await pipeline(pgdump.stdout, gzip, output);
-
     return new Promise((resolve, reject) => {
       pgdump.on('close', (code) => {
         if (code === 0) {
@@ -129,6 +127,8 @@ export class BackupService {
       pgdump.on('error', (err) => {
         reject(new Error(`Failed to spawn pg_dump: ${err.message}`));
       });
+
+      pipeline(pgdump.stdout, gzip, output).catch(reject);
     });
   }
 

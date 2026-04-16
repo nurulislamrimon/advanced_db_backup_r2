@@ -28,4 +28,9 @@ export class BackupController {
   async triggerBackup() {
     return this.backupService.runBackup();
   }
+
+  @Get('backup/files')
+  async getAllBackups() {
+    return this.backupService.getAllBackups();
+  }
 }

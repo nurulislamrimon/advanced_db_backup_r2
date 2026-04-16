@@ -1,7 +1,13 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { S3Client, PutObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
+import {
+  S3Client,
+  PutObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
+  HeadObjectCommand,
+} from '@aws-sdk/client-s3';
 import { createReadStream, statSync } from 'fs';
-import { R2Config } from '../types';
+import { R2Config, BackupMetadata } from '../types';
 
 const MAX_RETRIES = 3;
 const RETRY_DELAY_MS = 1000;
@@ -73,6 +79,44 @@ export class R2Service {
     } catch (error) {
       this.logger.error('Failed to list backups', String(error));
       return [];
+    }
+  }
+
+  async getObjectMetadata(key: string): Promise<BackupMetadata | null> {
+    try {
+      const command = new HeadObjectCommand({
+        Bucket: this.bucket,
+        Key: key,
+      });
+
+      const response = await this.client.send(command);
+      const filename = key.split('/').pop() || '';
+      const match = filename.match(
+        /backup-(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(\d{3})Z\.sql\.gz/
+      );
+
+      let timestamp: Date;
+      if (match) {
+        const [, year, month, day, hour, min, sec, ms] = match;
+        timestamp = new Date(`${year}-${month}-${day}T${hour}:${min}:${sec}.${ms}Z`);
+      } else {
+        timestamp = new Date(response.LastModified || Date.now());
+        this.logger.warn(
+          `Could not parse timestamp from filename: ${filename}, using LastModified`
+        );
+      }
+
+      return {
+        timestamp: timestamp.toISOString(),
+        filename,
+        size: response.ContentLength || 0,
+        checksum: response.ETag?.replace(/"/g, '') || '',
+        duration: 0,
+        status: 'success',
+      };
+    } catch (error) {
+      this.logger.error(`Failed to get metadata for ${key}`, String(error));
+      return null;
     }
   }
 

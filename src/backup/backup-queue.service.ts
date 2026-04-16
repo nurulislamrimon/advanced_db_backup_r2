@@ -1,5 +1,6 @@
 import { Worker, Queue, QueueEvents } from 'bullmq';
 import { Logger } from '@nestjs/common';
+import { BackupMetadata } from '../types';
 
 export class BackupQueueService {
   private readonly logger = new Logger(BackupQueueService.name);
@@ -10,7 +11,7 @@ export class BackupQueueService {
   constructor(
     private redisHost: string,
     private redisPort: number,
-    private backupJob: () => Promise<void>
+    private backupJob: () => Promise<BackupMetadata>
   ) {
     this.queue = new Queue('backup-queue', {
       connection: {

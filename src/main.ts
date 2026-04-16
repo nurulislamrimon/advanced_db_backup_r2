@@ -3,8 +3,9 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
 async function bootstrap() {
+  const port = 5000;
   const app = await NestFactory.create(AppModule);
-  
+
   const server = app.getHttpServer();
   const shutdown = async () => {
     console.log('Shutdown signal received, closing server...');
@@ -21,8 +22,8 @@ async function bootstrap() {
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
 
-  await app.listen(3000);
-  console.log('Application started on port 3000');
+  await app.listen(port);
+  console.log('Application started on port ' + port);
 }
 
 bootstrap();

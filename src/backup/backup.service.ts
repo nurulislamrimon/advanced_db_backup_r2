@@ -28,10 +28,18 @@ export class BackupService {
     this.alertService = new AlertService(config.alert);
   }
 
-  async runBackup(): Promise<void> {
+  async runBackup(): Promise<BackupMetadata> {
     if (this.isRunning) {
       this.logger.warn('Backup already in progress, skipping');
-      return;
+      return {
+        timestamp: new Date().toISOString(),
+        filename: '',
+        size: 0,
+        checksum: '',
+        duration: 0,
+        status: 'failure',
+        error: 'Backup already in progress',
+      };
     }
 
     this.isRunning = true;
@@ -41,20 +49,41 @@ export class BackupService {
       const result = await this.originalService.executeBackup();
 
       if (!result.success) {
+        const metadata: BackupMetadata = {
+          timestamp: new Date().toISOString(),
+          filename: '',
+          size: 0,
+          checksum: '',
+          duration: result.duration || 0,
+          status: 'failure',
+          error: result.error,
+        };
         await this.alertService.sendBackupFailureAlert(result.error || 'Unknown error', {
           duration: result.duration,
         });
         this.isRunning = false;
-        return;
+        return metadata;
       }
 
       if (result.filepath && result.filename) {
         const uploadResult = await this.r2Service.uploadFile(result.filepath, result.filename);
 
         if (!uploadResult.success) {
-          await this.alertService.sendUploadFailureAlert(uploadResult.error || 'Unknown error', result.filename);
+          const metadata: BackupMetadata = {
+            timestamp: new Date().toISOString(),
+            filename: result.filename || '',
+            size: result.size || 0,
+            checksum: result.checksum || '',
+            duration: result.duration || 0,
+            status: 'failure',
+            error: `Upload failed: ${uploadResult.error}`,
+          };
+          await this.alertService.sendUploadFailureAlert(
+            uploadResult.error || 'Unknown error',
+            result.filename
+          );
           this.isRunning = false;
-          return;
+          return metadata;
         }
 
         await this.originalService.cleanupTempFile(result.filepath);
@@ -73,19 +102,47 @@ export class BackupService {
       await this.alertService.sendBackupSuccessAlert(metadata);
 
       await this.runRetention();
+      return metadata;
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       this.logger.error('Backup error', errorMessage);
       await this.alertService.sendBackupFailureAlert(errorMessage);
+      return {
+        timestamp: new Date().toISOString(),
+        filename: '',
+        size: 0,
+        checksum: '',
+        duration: 0,
+        status: 'failure',
+        error: errorMessage,
+      };
     } finally {
       this.isRunning = false;
     }
   }
 
+  async getAllBackups(): Promise<BackupMetadata[]> {
+    const keys = await this.r2Service.listBackups('backups/');
+    const backups: BackupMetadata[] = [];
+
+    for (const key of keys) {
+      const metadata = await this.r2Service.getObjectMetadata(key);
+      if (metadata) {
+        backups.push(metadata);
+      }
+    }
+
+    return backups.sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+  }
+
   async runRetention(dryRun = false): Promise<void> {
     try {
       const result = await this.retentionService.applyRetentionPolicy(dryRun);
-      this.logger.log(`Retention completed: deleted=${result.deleted.length}, kept=${result.kept.length}`);
+      this.logger.log(
+        `Retention completed: deleted=${result.deleted.length}, kept=${result.kept.length}`
+      );
 
       if (result.errors.length > 0) {
         await this.alertService.sendRetentionFailureAlert(result.errors.join(', '));
