@@ -356,22 +356,25 @@ export class BackupService {
       const gunzip = spawn('gunzip', ['-c', '-d', filepath]);
       const output = createWriteStream(decompressedPath);
 
-      let stderr = '';
-      gunzip.stderr.on('data', (data) => {
-        stderr += data.toString();
-      });
       gunzip.stdout.pipe(output);
 
       gunzip.on('close', (code) => {
         output.end(() => {
           if (code !== 0) {
-            resolve({ success: false, message: `Gunzip failed (code ${code})`, error: stderr });
+            resolve({ success: false, message: `Gunzip failed (code ${code})` });
             return;
           }
 
           const pgRestore = spawn(
             'pg_restore',
             [
+              '--clean',
+              '--if-exists',
+              '--no-security-labels',
+              '--no-table-access-method',
+              '--no-tablespaces',
+              '--no-owner',
+              '--no-privileges',
               '-h',
               host,
               '-p',
@@ -396,36 +399,39 @@ export class BackupService {
           });
 
           pgRestore.on('close', (restoreCode) => {
-            if (existsSync(decompressedPath)) {
-              unlinkSync(decompressedPath);
-            }
+            if (existsSync(decompressedPath)) unlinkSync(decompressedPath);
+
+            const output = pgRestoreStdout + pgRestoreStderr;
+            const lines = output
+              .split('\n')
+              .filter((line) => !line.toLowerCase().includes('transaction_timeout'));
+            const filteredOutput = lines.join('\n');
+
             if (restoreCode === 0) {
               this.logger.log('Restore completed successfully');
               resolve({ success: true, message: 'Restore completed successfully' });
+            } else if (
+              restoreCode === 1 &&
+              (filteredOutput.includes('warning') || filteredOutput.includes('errors ignored'))
+            ) {
+              this.logger.warn(`pg_restore completed with warnings`);
+              resolve({
+                success: true,
+                message: 'Restore completed (with warnings)',
+                error: filteredOutput,
+              });
             } else {
-              const output = pgRestoreStdout + '\n' + pgRestoreStderr;
-              if (output.includes('warning') || output.includes('ignored')) {
-                this.logger.warn(`pg_restore completed with warnings: ${output}`);
-                resolve({
-                  success: true,
-                  message: 'Restore completed (with warnings)',
-                  error: output,
-                });
-              } else {
-                this.logger.error(`pg_restore failed: ${output}`);
-                resolve({
-                  success: false,
-                  message: `pg_restore failed (code ${restoreCode})`,
-                  error: output,
-                });
-              }
+              this.logger.error(`pg_restore failed: ${output}`);
+              resolve({
+                success: false,
+                message: `pg_restore failed (code ${restoreCode})`,
+                error: output,
+              });
             }
           });
 
           pgRestore.on('error', (err) => {
-            if (existsSync(decompressedPath)) {
-              unlinkSync(decompressedPath);
-            }
+            if (existsSync(decompressedPath)) unlinkSync(decompressedPath);
             this.logger.error(`pg_restore error: ${err.message}`);
             resolve({ success: false, message: 'pg_restore failed', error: err.message });
           });
