@@ -1,8 +1,8 @@
 networks:
   saas-network:
     external: true
-  app-network:
-    external: true
+  # app-network:
+  #   external: true
 
 volumes:
   backup-temp:
@@ -23,6 +23,6 @@ services:
       - .env
     networks:
       - saas-network
-      - app-network
+      # - app-network
     volumes:
       - backup-temp:/tmp
